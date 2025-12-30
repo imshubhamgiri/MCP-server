@@ -5,8 +5,11 @@ import { Client } from '@modelcontextprotocol/sdk/client';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 config();
 
-const ai = new GoogleGenAI({});
 
+
+const ai = new GoogleGenAI({
+  apiKey: "AIzaSyCLB4MRQZeuHJ3HMRooxL6GK9ZinlDSYSI"
+});
 
 const rl = readline.createInterface({
     input: process.stdin,
@@ -17,68 +20,113 @@ const mcpClient = new Client({
    version: "1.0.0",
 })
 
- const transport = new StreamableHTTPClientTransport(
+let tools = [];
+const transport = new StreamableHTTPClientTransport(
     new URL('http://localhost:3000/mcp')
   );
 
 mcpClient.connect(transport)
     .then(async () => {
-        console. log("✅ Connected to MCP server");
+        console.log("✅ Connected to MCP server");
 
         // Get available tools from MCP server
-        tools = (await mcpClient.listTools()).tools. map(tool => {
+        tools = (await mcpClient.listTools()).tools.map(tool => {
             return {
-                name:  tool.name,
+                name: tool.name,
                 description: tool.description,
                 parameters: {
-                    type: tool.inputSchema. type,
+                    type: tool.inputSchema.type,
                     properties: tool.inputSchema.properties,
                     required: tool.inputSchema.required
                 }
             };
         });
 
-        console.log("📋 Available tools:", tools. map(t => t.name).join(', '));
-        console.log("\n💬 Start chatting!  (Ctrl+C to exit)\n");
+        // console.log("📋 Available tools:", tools)
+        // console.log("\n💬 Start chatting!  (Ctrl+C to exit)\n");
+        Giveanswer();
 
-        chatLoop();
     })
     .catch(error => {
         console.error("❌ Connection failed:", error);
-        process.exit(1);
+        // process.exit(1);
     });
 
 const chathistory = [];
 
-async function Giveanswer() {
+async function Giveanswer(toolCall) {
   while (true) {
-    try {
-      const question = await rl.question('Your question here: ');
-      
-      if (question.toLowerCase() === 'stop' || question.toLowerCase() === 'exit') {
-        rl.close();
-        break;
-      }
-      
+    if (toolCall) {
+      console.log("calling tool ", toolCall.name)
+
+      chathistory.push({
+        role: "model",
+        parts: [{
+          text: `calling tool ${toolCall.name}`,
+          type: "text"
+        }]
+      })
+
+      const toolResult = await mcpClient.callTool({
+        name: toolCall.name,
+        arguments: toolCall.args
+      })
+
       chathistory.push({
         role: "user",
-        parts: [{text: question, type: "text"}]
-      });
+        parts: [{
+          text: "Tool result : " + toolResult.content[0].text,
+          type: "text"
+        }]
+      })
+    } else {
+      const question = await rl.question('You: ');
+      chathistory.push({
+        role: "user",
+        parts: [{
+          text: question,
+          type: "text"
+        }]
+      })
+    }
 
+    try {
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: "gemini-2.0-flash",
         contents: chathistory,
-      });
+        config: {
+          tools: [
+            {
+              functionDeclarations: tools,
+            }
+          ]
+        }
+      })
 
-      chathistory.push({role: 'model', parts: [{text: response.text, type: 'text'}]});
-      console.log(`AI - ${response.candidates[0].content.parts[0].text}`);
-      
+      const functionCall = response.candidates?.[0]?.content?.parts?.[0]?.functionCall
+      const responseText = response.candidates?.[0]?.content?.parts?.[0]?.text
+
+      if (functionCall) {
+        toolCall = functionCall
+        continue
+      }
+
+      chathistory.push({
+        role: "model",
+        parts: [{
+          text: responseText,
+          type: "text"
+        }]
+      })
+
+      console.log(`AI: ${responseText}`)
+
+      toolCall = null
     } catch (error) {
-      console.log('Error:', error);
-      rl.close();
+      console.error("❌ API Error:", error.message);
+      console.error("Error details:", error);
       break;
     }
   }
 }
-
-Giveanswer();
+  

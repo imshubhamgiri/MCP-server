@@ -34,4 +34,13 @@ Thumbs.db
 
 # Misc
 .cache/
-temp/
+temp/ 
+
+#extra files
+GETTING_STARTED.md
+INDEX.md
+OLD_VS_NEW.md
+QUICK_REFERENCE.md
+MIGRATION_GUIDE.md
+server-stateless.js
+client-stateless.js
