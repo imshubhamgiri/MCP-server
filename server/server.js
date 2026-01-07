@@ -4,6 +4,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { createMcpExpressApp } from '@modelcontextprotocol/sdk/server/express.js';
 import * as z from 'zod/v4';
 import { logMcpLifecycle, logStages } from './logger.js';
+import { createPost } from './mcp.tool.js';
 
 const app = createMcpExpressApp();
 app.use(express.json());
@@ -105,6 +106,20 @@ const getServer = () => {
                     text: `The sum of ${a} and ${b} is ${sum}.`
                 }]
             };
+        }
+    )
+
+    server.registerTool(
+        'create_post',
+        {
+            description: 'Creates a new post on X formally Known as  Twitter',
+            inputSchema: z.object({
+                status: z.string().describe('The text content of the tweet')
+            })
+        },
+        async ({ status }) => {
+            const result = await createPost(status);
+            return result;
         }
     )
 
