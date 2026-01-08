@@ -44,3 +44,6 @@ QUICK_REFERENCE.md
 MIGRATION_GUIDE.md
 server-stateless.js
 client-stateless.js
+TEST_RESULTS.md
+test_file.txt
+test-prompt.js

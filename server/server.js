@@ -4,7 +4,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { createMcpExpressApp } from '@modelcontextprotocol/sdk/server/express.js';
 import * as z from 'zod/v4';
 import { logMcpLifecycle, logStages } from './logger.js';
-import { createPost } from './mcp.tool.js';
+import { createPost, readDirectory, readFileContent } from './mcp.tool.js';
 
 const app = createMcpExpressApp();
 app.use(express.json());
@@ -120,6 +120,32 @@ const getServer = () => {
         async ({ status }) => {
             const result = await createPost(status);
             return result;
+        }
+    )
+
+    server.registerTool(
+        'read_directory',
+        {
+            description: 'Lists all files and folders in a given directory',
+            inputSchema: z.object({
+                directory: z.string().describe('The directory path to read (absolute or relative)')
+            })
+        },
+        async ({ directory }) => {
+            return await readDirectory(directory);
+        }
+    )
+
+    server.registerTool(
+        'read_file',
+        {
+            description: 'Reads the contents of a any type of file(pdf or text) from the local system',
+            inputSchema: z.object({
+                filepath: z.string().describe('The file path to read (absolute or relative)')
+            })
+        },
+        async ({ filepath }) => {
+            return await readFileContent(filepath);
         }
     )
 
