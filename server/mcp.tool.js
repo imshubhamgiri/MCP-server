@@ -124,3 +124,245 @@ export async function readFileContent(filePath) {
         }
     }
 }
+
+
+export async function GithubDataFetcher(username, repo) {
+    let apiUrl = `https://api.github.com/users/${username}`;
+    
+    // If repo is provided, fetch specific repo details; otherwise fetch all repos
+    if (repo) {
+        apiUrl = `https://api.github.com/repos/${username}/${repo}`;
+    } else {
+        apiUrl = `${apiUrl}/repos`;
+    }
+    
+    try {
+         const response = await fetch(apiUrl, {
+            headers: { 
+                'User-Agent': 'mcp-server-2026', // Required by GitHub API
+                'Accept': 'application/vnd.github.v3+json'
+            }
+        });
+         if (!response.ok) {
+            throw new Error(`GitHub API error: ${response.statusText}`);
+        }
+      const data = await response.json();
+        return {
+            content:[
+                {
+                    type: "text",
+                    text: JSON.stringify(data, null, 2)
+                }
+            ]
+        };
+
+    } catch (error) {
+         return {
+            content: [
+                {
+                    type: "text",
+                    text: `Error fetching GitHub data: ${error.message}`
+                }
+            ],
+         isError: true,
+        }
+    }
+}
+
+export async function FetchGithubReadme(username, repo) {
+    const apiUrl = `https://api.github.com/repos/${username}/${repo}/readme`;
+    
+    try {
+        const response = await fetch(apiUrl, {
+            headers: { 
+                'User-Agent': 'mcp-server-2026',
+                'Accept': 'application/vnd.github.v3.raw'
+            }
+        });
+        
+        if (!response.ok) {
+            throw new Error(`Could not fetch README: ${response.statusText}`);
+        }
+        
+        const readmeContent = await response.text();
+        
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: readmeContent
+                }
+            ]
+        };
+    } catch (error) {
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: `Error fetching README: ${error.message}`
+                }
+            ],
+            isError: true
+        };
+    }
+}
+
+export async function FetchGithubFileContent(username, repo, filePath) {
+    const apiUrl = `https://api.github.com/repos/${username}/${repo}/contents/${filePath}`;
+    
+    try {
+        const response = await fetch(apiUrl, {
+            headers: { 
+                'User-Agent': 'mcp-server-2026',
+                'Accept': 'application/vnd.github.v3.raw'
+            }
+        });
+        
+        if (!response.ok) {
+            throw new Error(`Could not fetch file: ${response.statusText}`);
+        }
+        
+        const fileContent = await response.text();
+        
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: fileContent
+                }
+            ],
+            metadata: {
+                filePath: filePath,
+                source: `${username}/${repo}`
+            }
+        };
+    } catch (error) {
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: `Error fetching file content: ${error.message}`
+                }
+            ],
+            isError: true
+        };
+    }
+}
+
+export async function FetchGithubRepoStructure(username, repo, path = '') {
+    let apiUrl = `https://api.github.com/repos/${username}/${repo}/contents`;
+    if (path) {
+        apiUrl += `/${path}`;
+    }
+    
+    try {
+        const response = await fetch(apiUrl, {
+            headers: { 
+                'User-Agent': 'mcp-server-2026',
+                'Accept': 'application/vnd.github.v3+json'
+            }
+        });
+        
+        if (!response.ok) {
+            throw new Error(`Could not fetch repo structure: ${response.statusText}`);
+        }
+        
+        const data = await response.json();
+        
+        // Format the file structure in a readable way
+        let structureText = `📁 ${path ? path : repo}\n`;
+        
+        if (Array.isArray(data)) {
+            data.forEach(item => {
+                const indent = '  ';
+                if (item.type === 'dir') {
+                    structureText += `${indent}📁 ${item.name}/\n`;
+                } else {
+                    structureText += `${indent}📄 ${item.name}\n`;
+                }
+            });
+        } else {
+            structureText = `This is a file, not a directory`;
+        }
+        
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: structureText
+                }
+            ],
+            metadata: {
+                items: Array.isArray(data) ? data.map(item => ({
+                    name: item.name,
+                    type: item.type,
+                    path: item.path
+                })) : []
+            }
+        };
+    } catch (error) {
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: `Error fetching repo structure: ${error.message}`
+                }
+            ],
+            isError: true
+        };
+    }
+}
+
+export async function SendMessageToTelegram(message, chatId = null) {
+    const botToken = process.env.TELEGRAM_BOT_TOKEN;
+    const defaultChatId = process.env.TELEGRAM_CHAT_ID;
+    const finalChatId = chatId || defaultChatId;
+    
+    if (!finalChatId) {
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: `Error: No chat ID provided and TELEGRAM_CHAT_ID not set in environment`
+                }
+            ],
+            isError: true
+        };
+    }
+    
+    const apiUrl = `https://api.telegram.org/bot${botToken}/sendMessage`;
+    try {
+        const response = await fetch(apiUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                chat_id: finalChatId,
+                text: message
+            })
+        });
+        const data = await response.json();
+        if (!data.ok) {
+            throw new Error(`Telegram API error: ${data.description}`);
+        }
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: `Message sent to Telegram chat ID ${chatId}`
+                }
+            ]
+        };
+    } catch (error) {
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: `Error sending message to Telegram: ${error.message}`
+                }
+            ],
+            isError: true
+        };
+    }
+}

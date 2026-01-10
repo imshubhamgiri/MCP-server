@@ -4,7 +4,8 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { createMcpExpressApp } from '@modelcontextprotocol/sdk/server/express.js';
 import * as z from 'zod/v4';
 import { logMcpLifecycle, logStages } from './logger.js';
-import { createPost, readDirectory, readFileContent } from './mcp.tool.js';
+import { createPost, GithubDataFetcher, readDirectory, readFileContent, FetchGithubReadme, FetchGithubFileContent,
+ FetchGithubRepoStructure , SendMessageToTelegram } from './mcp.tool.js';
 
 const app = createMcpExpressApp();
 app.use(express.json());
@@ -148,6 +149,84 @@ const getServer = () => {
             return await readFileContent(filepath);
         }
     )
+
+    server.registerTool(
+        'github-user-fetcher',
+        {
+            description: 'Fetches GitHub user information and repositories by username. If repo is not provided, fetches all repos for the user.',
+            inputSchema: z.object({
+                username: z.string().describe('The GitHub username to fetch information for'),
+                repo: z.string().optional().describe('Optional: The specific repository name to fetch details for. If not provided, fetches all repositories')
+            })
+        },
+        async({ username, repo }) =>{
+            return await GithubDataFetcher(username, repo);
+        }
+    )
+
+    server.registerTool(
+        'github-readme-fetcher',
+        {
+            description: 'Fetches the README.md file from a GitHub repository',
+            inputSchema: z.object({
+                username: z.string().describe('The GitHub username/organization'),
+                repo: z.string().describe('The repository name')
+            })
+        },
+        async({ username, repo }) => {
+            return await FetchGithubReadme(username, repo);
+        }
+    )
+
+    server.registerTool(
+        'github-file-fetcher',
+        {
+            description: 'Fetches the contents of a specific file from a GitHub repository (code files, configs, etc.)',
+            inputSchema: z.object({
+                username: z.string().describe('The GitHub username/organization'),
+                repo: z.string().describe('The repository name'),
+                filePath: z.string().describe('The file path in the repo (e.g., src/main.js, package.json, docs/guide.md)')
+            })
+        },
+        async({ username, repo, filePath }) => {
+            return await FetchGithubFileContent(username, repo, filePath);
+        }
+    )
+
+    server.registerTool(
+        'github-repo-structure',
+        {
+            description: 'Fetches the file and folder structure of a GitHub repository or a specific directory within it',
+            inputSchema: z.object({
+                username: z.string().describe('The GitHub username/organization'),
+                repo: z.string().describe('The repository name'),
+                path: z.string().optional().describe('Optional: The directory path within the repo (e.g., src, docs). If not provided, shows root directory')
+            })
+        },
+        async({ username, repo, path }) => {
+            return await FetchGithubRepoStructure(username, repo, path);
+        }
+    )
+
+    server.registerTool(
+        'send-telegram-message',
+        {
+            description: 'Sends a message to a specified Telegram chat using a bot',
+            inputSchema: z.object({
+                message: z.string().describe('The message text to send'),
+                chatId: z.string().optional().describe('The Telegram chat ID to send the message to (optional )')
+            })
+        },
+        async({ message, chatId }) => {
+            const botToken = process.env.TELEGRAM_BOT_TOKEN;
+            if (!botToken) {
+                throw new Error('Telegram bot token is not configured.');
+            }
+            return await SendMessageToTelegram(message, chatId);
+        }
+    )
+    
+
 
     // Create a simple resource at a fixed URI
     server.registerResource(
