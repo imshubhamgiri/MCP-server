@@ -115,11 +115,12 @@ const getServer = () => {
         {
             description: 'Creates a new post on X formally Known as  Twitter',
             inputSchema: z.object({
-                status: z.string().describe('The text content of the tweet')
+                status: z.string().describe('The text content of the tweet'),
+                media: z.union([z.array(z.string()), z.string()]).optional().describe('Optional array/single of media file paths to attach to the tweet')
             })
         },
-        async ({ status }) => {
-            const result = await createPost(status);
+        async ({ status, media }) => {
+            const result = await createPost(status, media);
             return result;
         }
     )

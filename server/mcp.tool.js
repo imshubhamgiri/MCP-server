@@ -16,9 +16,57 @@ const twitterClient = new TwitterApi({
     accessSecret: process.env.TWITTER_ACCESS_TOKEN_SECRET
 })
 
-export async function createPost(status) {
-    const newPost = await twitterClient.v2.tweet(status)
-
+export async function createPost(status, media) {
+    // Convert string to array if needed
+    const mediaArray = typeof media === 'string' ? [media] : media;
+    
+    if (mediaArray && mediaArray.length > 0) {
+        try {
+            
+            const mediaIds = [];
+            for (const mediaPath of mediaArray) {
+                try {
+                    // Handle both absolute and relative paths
+                    const absolutePath = mediaPath.includes(':') ? mediaPath : resolve(mediaPath);
+                      console.log(`Uploading media from: ${absolutePath}`);
+                    const mediaId = await twitterClient.v1.uploadMedia(absolutePath);
+                    console.log(`✅ Media uploaded successfully, ID: ${mediaId}`);
+                    mediaIds.push(mediaId);
+                } catch (error) {
+                    console.error(`Error uploading media ${mediaPath}:`, error.message);
+                    throw new Error(`Failed to upload media: ${mediaPath} - ${error.message}`);
+                }
+            }
+            console.log(`Posting tweet with ${mediaIds.length} media files...`);
+            const newPost = await twitterClient.v2.tweet({
+                text: status,
+                media: {
+                    media_ids: mediaIds
+                }
+            });
+            console.log(`✅ Tweet posted successfully`);
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `Tweeted: ${status}`
+                    }
+                ]
+            };
+        } catch (error) {
+            console.error('❌ Error creating tweet with media:', error);
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `Error: ${error.message || error}`
+                    }
+                ]
+            };
+        }
+    }
+    
+    const newPost = await twitterClient.v2.tweet(status);
     return {
         content: [
             {
@@ -26,7 +74,7 @@ export async function createPost(status) {
                 text: `Tweeted: ${status}`
             }
         ]
-    }
+    };
 }
 
 export async function readDirectory(dirPath) {
