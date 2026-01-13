@@ -37,6 +37,8 @@ export async function createPost(status, media) {
                     throw new Error(`Failed to upload media: ${mediaPath} - ${error.message}`);
                 }
             }
+            // Add a small delay to ensure media is indexed before posting
+            await new Promise(resolve => setTimeout(resolve, 1000));
             console.log(`Posting tweet with ${mediaIds.length} media files...`);
             const newPost = await twitterClient.v2.tweet({
                 text: status,

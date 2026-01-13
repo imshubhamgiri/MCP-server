@@ -80,25 +80,38 @@ async function main() {
 
                 const parts = response.candidates?.[0]?.content?.parts || [];
                 let hasToolCall = false;
-                let modelResponse = '';
 
-                // Add AI response to history
-                chathistory.push({
-                    role: "model",
-                    parts: parts.map(part => {
-                        if (part.functionCall) {
-                            return { text: ` Calling Tool ${part.functionCall.name}` };  // Only functionCall
-                        } else {
-                            return { text: part.text };  // Only text
+                // Add AI response to history BEFORE processing
+                // Separate text and functionCall parts
+                const modelParts = [];
+                for (const part of parts) {
+                    if (part.text) {
+                        // Clean control characters from text
+                        const cleanText = part.text.replace(/<ctrl\d+>/g, '');
+                        if (cleanText.trim()) {
+                            modelParts.push({ text: cleanText });
                         }
-                    }) 
-                });
+                    }
+                    if (part.functionCall) {
+                        modelParts.push({ functionCall: part.functionCall });
+                    }
+                }
+                
+                if (modelParts.length > 0) {
+                    chathistory.push({
+                        role: "model",
+                        parts: modelParts
+                    });
+                }
 
                 // Process all parts from the response
                 for (const part of parts) {
                     if (part.text) {
-                        modelResponse += part.text;
-                        console.log(`AI: ${part.text}`);
+                        // Clean control characters from display text
+                        const cleanText = part.text.replace(/<ctrl\d+>/g, '');
+                        if (cleanText.trim()) {
+                            console.log(`AI: ${cleanText}`);
+                        }
                     }
 
                     if (part.functionCall) {
@@ -114,7 +127,6 @@ async function main() {
                             });
 
                             const toolResultText = toolResult.content[0]?.text || JSON.stringify(toolResult);
-                            // console.log(`✅ Tool Result: ${toolResultText}\n`);
 
                             // Add tool result to history
                             chathistory.push({
