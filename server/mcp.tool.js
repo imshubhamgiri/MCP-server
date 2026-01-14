@@ -363,6 +363,117 @@ export async function FetchGithubRepoStructure(username, repo, path = '') {
     }
 }
 
+export async function readLocalResume(resumePath) {
+    try {
+        const absolutePath = resolve(resumePath)
+        const stats = await stat(absolutePath)
+        
+        if (stats.isDirectory()) {
+            throw new Error(`Path is a directory, not a file: ${resumePath}`)
+        }
+
+        const fileExtension = extname(absolutePath).toLowerCase()
+        
+        // Only accept PDF files for resume
+        if (fileExtension !== '.pdf') {
+            throw new Error(`Resume must be a PDF file. Received: ${fileExtension}`)
+        }
+
+        try {
+            const fileBuffer = await readFile(absolutePath)
+            const parser = new PDFParse({ data: new Uint8Array(fileBuffer) })
+            const pdfData = await parser.getText()
+            
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: pdfData.text
+                    }
+                ],
+                metadata: {
+                    fileName: absolutePath,
+                    size: stats.size,
+                    fileType: 'pdf',
+                    source: 'resume-parser'
+                }
+            }
+        } catch (pdfError) {
+            throw new Error(`Error parsing PDF resume: ${pdfError.message}`)
+        }
+    } catch (error) {
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: `Error reading resume: ${error.message}`
+                }
+            ],
+            isError: true
+        }
+    }
+}
+
+export async function FetchGithubLanguages(username, repo) {
+    const apiUrl = `https://api.github.com/repos/${username}/${repo}/languages`;
+    
+    try {
+        const response = await fetch(apiUrl, {
+            headers: { 
+                'User-Agent': 'mcp-server-2026',
+                'Accept': 'application/vnd.github.v3+json'
+            }
+        });
+        
+        if (!response.ok) {
+            throw new Error(`Could not fetch languages: ${response.statusText}`);
+        }
+        
+        const languagesData = await response.json();
+        
+        // Calculate total bytes and percentages
+        const totalBytes = Object.values(languagesData).reduce((a, b) => a + b, 0);
+        const languages = Object.entries(languagesData)
+            .map(([name, bytes]) => ({
+                name,
+                bytes,
+                percentage: totalBytes > 0 ? ((bytes / totalBytes) * 100).toFixed(2) : 0
+            }))
+            .sort((a, b) => b.bytes - a.bytes);
+        
+        // Format as readable text
+        let languageText = `📊 **Tech Stack for ${username}/${repo}:**\n\n`;
+        languages.forEach((lang, index) => {
+            languageText += `${index + 1}. ${lang.name}: ${lang.percentage}%\n`;
+        });
+        
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: languageText
+                }
+            ],
+            metadata: {
+                languages: languages,
+                totalBytes: totalBytes,
+                topLanguage: languages[0]?.name || 'Unknown',
+                repository: `${username}/${repo}`
+            }
+        };
+    } catch (error) {
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: `Error fetching language data: ${error.message}`
+                }
+            ],
+            isError: true
+        };
+    }
+}
+
 export async function SendMessageToTelegram(message, chatId = null) {
     const botToken = process.env.TELEGRAM_BOT_TOKEN;
     const defaultChatId = process.env.TELEGRAM_CHAT_ID;

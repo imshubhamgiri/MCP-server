@@ -67,7 +67,7 @@ async function main() {
             try {
                 // Send to Gemini API
                 const response = await ai.models.generateContent({
-                    model: "gemini-3-flash-preview",
+                    model: "gemini-2.5-flash",
                     contents: chathistory,
                     config: {
                         tools: [
