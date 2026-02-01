@@ -5,7 +5,7 @@ import { createMcpExpressApp } from '@modelcontextprotocol/sdk/server/express.js
 import * as z from 'zod/v4';
 import { logMcpLifecycle, logStages } from './logger.js';
 import { createPost, GithubDataFetcher, readDirectory, readFileContent, FetchGithubReadme, FetchGithubFileContent,
- FetchGithubRepoStructure , SendMessageToTelegram } from './mcp.tool.js';
+ FetchGithubRepoStructure , SendMessageToTelegram , job_score, readLocalResume, FetchGithubLanguages, enrichResumeWithAI, scoreJobMatch} from './mcp.tool.js';
 
 const app = createMcpExpressApp();
 app.use(express.json());
@@ -150,6 +150,19 @@ const getServer = () => {
             return await readFileContent(filepath);
         }
     )
+    server.registerTool(
+        'job-score-matcher',
+        {
+        description : 'Matches job descriptions with candidate resumes and provides a compatibility score',
+        inputSchema: z.object({
+            jobDescription: z.string().describe('The job description text'),
+        })
+        },
+        async ({ jobDescription, resumeText }) => {
+         
+            return await job_score(jobDescription, resumeText);
+        }
+    )
 
     server.registerTool(
         'github-user-fetcher',
@@ -226,6 +239,62 @@ const getServer = () => {
             return await SendMessageToTelegram(message, chatId);
         }
     )
+
+    server.registerTool(
+        'read-local-resume',
+        {
+            description: 'Reads a local PDF resume file and extracts text content',
+            inputSchema: z.object({
+                resumePath: z.string().describe('The path to the resume PDF file')
+            })
+        },
+        async({ resumePath }) => {
+            return await readLocalResume(resumePath);
+        }
+    )
+
+    server.registerTool(
+        'github-languages',
+        {
+            description: 'Fetches the programming languages used in a GitHub repository',
+            inputSchema: z.object({
+                username: z.string().describe('The GitHub username/organization'),
+                repo: z.string().describe('The repository name')
+            })
+        },
+        async({ username, repo }) => {
+            return await FetchGithubLanguages(username, repo);
+        }
+    )
+
+    server.registerTool(
+        'enrich-resume-with-ai',
+        {
+            description: 'Enriches a resume with GitHub data using AI (Gemini)',
+            inputSchema: z.object({
+                resumeText: z.string().describe('The base resume text'),
+                githubData: z.union([z.string(), z.object({}).passthrough()]).describe('GitHub data (languages, projects, user info)')
+            })
+        },
+        async({ resumeText, githubData }) => {
+            return await enrichResumeWithAI(resumeText, githubData);
+        }
+    )
+
+    server.registerTool(
+        'score-job-match',
+        {
+            description: 'Scores job description match against resume using AI (Gemini)',
+            inputSchema: z.object({
+                jobDescription: z.string().describe('The job description text'),
+                resumeText: z.string().describe('The candidate resume text'),
+                scoreThreshold: z.number().optional().describe('Score threshold for application decision (1-10, default 6)')
+            })
+        },
+        async({ jobDescription, resumeText, scoreThreshold = 6 }) => {
+            return await scoreJobMatch(jobDescription, resumeText, scoreThreshold);
+        }
+    )
     
 
 
@@ -298,4 +367,48 @@ app.listen(PORT, error => {
 process.on('SIGINT', async () => {
     console.log('\n👋 Shutting down server...');
     process.exit(0);
+});
+
+import { runAgentWorkflow } from './agent.js';
+
+app.post('/agent-workflow', async (req, res) => {
+    const { prompt } = req.body;
+    
+    if (!prompt) {
+        return res.status(400).json({ 
+            success: false,
+            error: 'Missing "prompt" in request body. Example: {"prompt": "Read my resume and analyze it"}' 
+        });
+    }
+
+    console.log(`\n📥 Received /agent-workflow request`);
+    
+    try {
+        // Run agent directly - NO network call to MCP server needed
+        const result = await runAgentWorkflow(prompt);
+        
+        console.log(`✅ Agent workflow completed successfully\n`);
+        
+        res.json(result);
+
+    } catch (error) {
+        console.error('❌ Error in agent workflow:', error.message);
+        res.status(500).json({ 
+            success: false,
+            error: error.message,
+            details: error.stack
+        });
+    }
+});
+
+app.get('/health', (req, res) => {
+    res.json({ 
+        status: 'ok', 
+        timestamp: new Date().toISOString(),
+        endpoints: {
+            '/mcp': 'MCP Protocol endpoint',
+            '/agent-workflow': 'AI agent workflow endpoint',
+            '/health': 'Health check'
+        }
+    });
 });
