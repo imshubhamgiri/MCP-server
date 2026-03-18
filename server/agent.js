@@ -1,163 +1,78 @@
 // server/agent.js
 import { GoogleGenAI } from "@google/genai";
-import {
-    createPost,
-    GithubDataFetcher,
-    readDirectory,
-    readFileContent,
-    FetchGithubReadme,
-    FetchGithubFileContent,
-    FetchGithubRepoStructure,
-    SendMessageToTelegram,
-    job_score,
-    readLocalResume,
-    FetchGithubLanguages,
-    enrichResumeWithAI,
-    scoreJobMatch
-} from './mcp.tool.js';
+import { Client } from "@modelcontextprotocol/sdk/client";
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import express from 'express';
 
 const ai = new GoogleGenAI({});
 
-// Tool definitions for Gemini
-const TOOL_DEFINITIONS = [
-    {
-        name: "read-local-resume",
-        description: "Reads a local PDF resume file and extracts text content",
-        parameters: {
-            type: "object",
-            properties: {
-                resumePath: { type: "string", description: "The path to the resume PDF file" }
-            },
-            required: ["resumePath"]
-        }
-    },
-    {
-        name: "github-user-fetcher",
-        description: "Fetches GitHub user information and repositories by username",
-        parameters: {
-            type: "object",
-            properties: {
-                username: { type: "string", description: "The GitHub username" },
-                repo: { type: "string", description: "Optional: specific repo name" }
-            },
-            required: ["username"]
-        }
-    },
-    {
-        name: "github-languages",
-        description: "Fetches the programming languages used in a GitHub repository",
-        parameters: {
-            type: "object",
-            properties: {
-                username: { type: "string", description: "The GitHub username" },
-                repo: { type: "string", description: "The repository name" }
-            },
-            required: ["username", "repo"]
-        }
-    },
-    {
-        name: "github-readme-fetcher",
-        description: "Fetches the README.md file from a GitHub repository",
-        parameters: {
-            type: "object",
-            properties: {
-                username: { type: "string", description: "The GitHub username" },
-                repo: { type: "string", description: "The repository name" }
-            },
-            required: ["username", "repo"]
-        }
-    },
-    {
-        name: "github-repo-structure",
-        description: "Fetches the file and folder structure of a GitHub repository",
-        parameters: {
-            type: "object",
-            properties: {
-                username: { type: "string", description: "The GitHub username" },
-                repo: { type: "string", description: "The repository name" },
-                path: { type: "string", description: "Optional: directory path within repo" }
-            },
-            required: ["username", "repo"]
-        }
-    },
-    {
-        name: "enrich-resume-with-ai",
-        description: "Enriches a resume with GitHub data using AI",
-        parameters: {
-            type: "object",
-            properties: {
-                resumeText: { type: "string", description: "The base resume text" },
-                githubData: { type: "string", description: "GitHub data as JSON string" }
-            },
-            required: ["resumeText", "githubData"]
-        }
-    },
-    {
-        name: "score-job-match",
-        description: "Scores job description match against resume using AI",
-        parameters: {
-            type: "object",
-            properties: {
-                jobDescription: { type: "string", description: "The job description text" },
-                resumeText: { type: "string", description: "The resume text" },
-                scoreThreshold: { type: "number", description: "Score threshold (default 6)" }
-            },
-            required: ["jobDescription", "resumeText"]
-        }
-    },
-    {
-        name: "read_file",
-        description: "Reads the contents of any type of file from the local system",
-        parameters: {
-            type: "object",
-            properties: {
-                filepath: { type: "string", description: "The file path to read" }
-            },
-            required: ["filepath"]
-        }
-    },
-    {
-        name: "read_directory",
-        description: "Lists all files and folders in a given directory",
-        parameters: {
-            type: "object",
-            properties: {
-                directory: { type: "string", description: "The directory path" }
-            },
-            required: ["directory"]
-        }
-    }
-];
+// MCP Client - will be initialized on startup
+let mcpClient = null;
+let TOOL_DEFINITIONS = [];
 
-// Map tool names to functions
-const TOOL_FUNCTIONS = {
-    "read-local-resume": readLocalResume,
-    "github-user-fetcher": GithubDataFetcher,
-    "github-languages": FetchGithubLanguages,
-    "github-readme-fetcher": FetchGithubReadme,
-    "github-repo-structure": FetchGithubRepoStructure,
-    "enrich-resume-with-ai": enrichResumeWithAI,
-    "score-job-match": scoreJobMatch,
-    "read_file": readFileContent,
-    "read_directory": readDirectory
-};
+export async function initializeMCPAgent() {
+    try {
+        mcpClient = new Client({
+            name: "agent-server",
+            version: "1.0.0",
+        });
+
+        const transport = new StreamableHTTPClientTransport(
+            new URL('http://localhost:3000/mcp')
+        );
+
+        await mcpClient.connect(transport);
+        console.log("✅ Agent connected to MCP server");
+
+        // Fetch tools dynamically from MCP server
+        const toolsResponse = await mcpClient.listTools();
+        const fetchedTools = toolsResponse.tools || [];
+
+        console.log(`📦 Found ${fetchedTools.length} tools from MCP server`);
+
+        // Convert MCP tools to Gemini function declarations
+        TOOL_DEFINITIONS = fetchedTools.map(tool => ({
+            name: tool.name,
+            description: tool.description,
+            parameters: {
+                type: tool.inputSchema.type || "object",
+                properties: tool.inputSchema.properties || {},
+                required: tool.inputSchema.required || []
+            }
+        }));
+
+        console.log(`✅ Loaded ${TOOL_DEFINITIONS.length} tool definitions for Gemini`);
+        return true;
+
+    } catch (error) {
+        console.error("❌ Failed to initialize MCP Agent:", error.message);
+        throw error;
+    }
+}
+
 
 async function callTool(toolName, toolArgs) {
-    const toolFunc = TOOL_FUNCTIONS[toolName];
-    if (!toolFunc) {
-        throw new Error(`Unknown tool: ${toolName}`);
+    if (!mcpClient) {
+        throw new Error("MCP Client not initialized. Call initializeMCPAgent() first.");
     }
 
     console.log(`🔧 Calling tool: ${toolName}`, JSON.stringify(toolArgs, null, 2));
     
-    // Call the function with the arguments
-    const result = await toolFunc(...Object.values(toolArgs));
-    
-    // Convert result to text if needed
-    const resultText = result.content?.[0]?.text || JSON.stringify(result);
-    console.log(`✅ Tool ${toolName} completed`);
-    
-    return resultText;
+    try {
+        const result = await mcpClient.callTool({
+            name: toolName,
+            arguments: toolArgs
+        });
+
+        const resultText = result.content?.[0]?.text || JSON.stringify(result);
+        console.log(`✅ Tool ${toolName} completed`);
+        
+        return resultText;
+
+    } catch (toolError) {
+        console.error(`❌ Tool Error (${toolName}):`, toolError.message);
+        throw toolError;
+    }
 }
 
 export async function runAgentWorkflow(prompt) {
@@ -177,18 +92,19 @@ export async function runAgentWorkflow(prompt) {
 
     let continueLoop = true;
     let iterations = 0;
-    const MAX_ITERATIONS = 15; // Prevent infinite loops
+    const MAX_ITERATIONS = 50; // Prevent infinite loops
 
     while (continueLoop && iterations < MAX_ITERATIONS) {
         iterations++;
         console.log(`\n--- Iteration ${iterations} ---`);
 
         try {
-            // Send to Gemini API with available tools
+            
             const response = await ai.models.generateContent({
-                model: "gemini-2.5-flash",
+                model: "gemini-3-flash-preview",
                 contents: chatHistory,
                 config: {
+                    systemInstruction: "You are an AI agent that can use tools to gather information and complete tasks. Use the available tools as needed to fulfill the user's request.",
                     tools: [
                         {
                             functionDeclarations: TOOL_DEFINITIONS
@@ -200,13 +116,13 @@ export async function runAgentWorkflow(prompt) {
             const parts = response.candidates?.[0]?.content?.parts || [];
             let hasToolCall = false;
 
-            // Process text parts
-            const textParts = [];
+            // Process text parts and prepare complete model response
+            const modelParts = [];
             for (const part of parts) {
                 if (part.text) {
                     const cleanText = part.text.replace(/<ctrl\d+>/g, '');
                     if (cleanText.trim()) {
-                        textParts.push({ text: cleanText });
+                        modelParts.push({ text: cleanText }  );
                         console.log(`💭 AI: ${cleanText.substring(0, 100)}...`);
                         steps.push({
                             type: "ai-response",
@@ -214,13 +130,16 @@ export async function runAgentWorkflow(prompt) {
                         });
                     }
                 }
+                if (part.functionCall) {
+                    modelParts.push({ functionCall: part.functionCall });
+                }
             }
 
-            // Add AI response to history
-            if (textParts.length > 0) {
+            // Add AI response to history (with both text AND function calls)
+            if (modelParts.length > 0) {
                 chatHistory.push({
                     role: "model",
-                    parts: textParts
+                    parts: modelParts
                 });
             }
 
@@ -244,11 +163,6 @@ export async function runAgentWorkflow(prompt) {
                     try {
                         const toolResult = await callTool(toolName, toolArgs);
 
-                        // Limit result size for context window
-                        const truncatedResult = toolResult.length > 5000 
-                            ? toolResult.substring(0, 5000) + '\n... (truncated)'
-                            : toolResult;
-
                         // Track tool usage
                         executedTools.push({
                             name: toolName,
@@ -260,12 +174,12 @@ export async function runAgentWorkflow(prompt) {
                         chatHistory.push({
                             role: "user",
                             parts: [{
-                                text: `Tool result for ${toolName}: ${truncatedResult}`,
+                                text: `Tool result for ${toolName}: ${toolResult}`,
                                 type: "text"
                             }]
                         });
 
-                        console.log(`✅ Tool result received (${toolResult.length} chars)`);
+                        // console.log(`Tool result received (${toolResult.length} chars)`);
                         steps.push({
                             type: "tool-result",
                             toolName: toolName,
@@ -334,10 +248,67 @@ export async function runAgentWorkflow(prompt) {
     return {
         success: true,
         finalResponse,
-        toolsUsed: executedTools,
-        steps,
-        toolCount: executedTools.length,
-        iterations,
+        // toolsUsed: executedTools,
+        // steps,
+        // toolCount: executedTools.length,
+        // iterations,
         timestamp: new Date().toISOString()
     };
+}
+
+
+export function createAgentRouter() {
+    const router = express.Router();
+
+    // Health check endpoint
+    router.get('/health', (req, res) => {
+        res.json({
+            status: "healthy",
+            toolsAvailable: TOOL_DEFINITIONS.length,
+            timestamp: new Date().toISOString()
+        });
+    });
+
+    router.post('/chat', async (req, res) => {
+        const { prompt } = req.body;
+
+        if (!prompt || typeof prompt !== 'string') {
+            return res.status(400).json({
+                error: "Missing or invalid 'prompt' in request body"
+            });
+        }
+
+        if (!mcpClient) {
+            return res.status(503).json({
+                error: "Agent not initialized. MCP client not connected."
+            });
+        }
+
+        if (TOOL_DEFINITIONS.length === 0) {
+            return res.status(503).json({
+                error: "No tools available. Agent cannot process requests."
+            });
+        }
+
+        try {
+            const result = await runAgentWorkflow(prompt);
+            res.json(result);
+        } catch (error) {
+            console.error("Agent error:", error.message);
+            res.status(500).json({
+                error: "Agent workflow failed",
+                message: error.message
+            });
+        }
+    });
+
+    // List available tools - useful for frontend to show capabilities
+    router.get('/tools', (req, res) => {
+        res.json({
+            tools: TOOL_DEFINITIONS,
+            count: TOOL_DEFINITIONS.length
+        });
+    });
+
+    return router;
 }

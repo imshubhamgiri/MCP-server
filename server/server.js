@@ -6,10 +6,13 @@ import * as z from 'zod/v4';
 import { logMcpLifecycle, logStages } from './logger.js';
 import { createPost, GithubDataFetcher, readDirectory, readFileContent, FetchGithubReadme, FetchGithubFileContent,
  FetchGithubRepoStructure , SendMessageToTelegram , job_score, readLocalResume, FetchGithubLanguages, enrichResumeWithAI, scoreJobMatch} from './mcp.tool.js';
+import { initializeMCPAgent, createAgentRouter } from './agent.js';
 
 const app = createMcpExpressApp();
 app.use(express.json());
 
+
+app.use('/agent', createAgentRouter());
 
 // Store transports by session ID for stateful operation
 const transports = {};
@@ -360,8 +363,19 @@ app.listen(PORT, error => {
     }
     logStages();
     console.log(`✅ MCP Stateless HTTP Server listening on port ${PORT}`);
-    console.log(`📍 Endpoint: http://localhost:${PORT}/mcp`);
+    console.log(`📍 MCP Endpoint: http://localhost:${PORT}/mcp`);
+    console.log(`🤖 Agent Endpoint: http://localhost:${PORT}/agent`);
     console.log(`🔧 Mode: STATELESS (no session IDs)\n`);
+
+    // Initialize Agent after server starts
+    initializeMCPAgent()
+        .then(() => {
+            console.log(`✅ Agent ready to accept requests at http://localhost:${PORT}/agent/chat\n`);
+        })
+        .catch(error => {
+            console.error("❌ Agent initialization failed:", error.message);
+            console.error("Agent endpoints will not be available");
+        });
 });
 
 process.on('SIGINT', async () => {
@@ -402,6 +416,7 @@ app.post('/agent-workflow', async (req, res) => {
 });
 
 app.get('/health', (req, res) => {
+    console.log(`\n🔍 Health check requested`);
     res.json({ 
         status: 'ok', 
         timestamp: new Date().toISOString(),
